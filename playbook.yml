@@ -1,0 +1,11 @@
+---
+databases:
+  - name: pesquisa2
+    if_not_exists: create_db.sql
+tables:
+  - database: pesquisa2
+    name: users
+    if_not_exists: create_users_table.sql
+  - database: pesquisa2
+    name: orders
+    if_not_exists: create_orders_table.sql
