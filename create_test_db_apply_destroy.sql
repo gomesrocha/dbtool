@@ -1,0 +1,1 @@
+CREATE DATABASE test_db_apply_destroy;
