@@ -1,5 +1,0 @@
-
-databases:
-  - name: test_db_apply_destroy
-    if_not_exists: create_test_db_apply_destroy.sql
-tables: []

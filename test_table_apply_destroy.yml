@@ -1,6 +1,0 @@
-
-databases: []
-tables:
-  - database: postgres
-    name: test_table_apply_destroy
-    if_not_exists: create_test_table_apply_destroy.sql
