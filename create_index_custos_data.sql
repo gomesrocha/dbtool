@@ -1,0 +1,1 @@
+CREATE INDEX idx_custos_data ON custos (data);

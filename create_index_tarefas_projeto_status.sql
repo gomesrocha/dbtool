@@ -1,0 +1,1 @@
+CREATE INDEX idx_tarefas_projeto_status ON tarefas (projeto_id, status);

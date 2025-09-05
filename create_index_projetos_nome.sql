@@ -1,0 +1,1 @@
+CREATE INDEX idx_projetos_nome ON projetos(nome);

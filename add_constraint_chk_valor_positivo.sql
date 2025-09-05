@@ -1,0 +1,1 @@
+ALTER TABLE custos ADD CONSTRAINT chk_valor_positivo CHECK (valor > 0);

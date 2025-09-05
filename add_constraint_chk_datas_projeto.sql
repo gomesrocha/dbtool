@@ -1,0 +1,1 @@
+ALTER TABLE projetos ADD CONSTRAINT chk_datas_projeto CHECK (data_inicio < data_fim OR data_fim IS NULL);

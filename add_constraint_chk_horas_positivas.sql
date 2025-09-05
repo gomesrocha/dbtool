@@ -1,0 +1,1 @@
+ALTER TABLE alocacao_pessoas ADD CONSTRAINT chk_horas_positivas CHECK (horas_alocadas >= 0);

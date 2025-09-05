@@ -1,0 +1,1 @@
+CREATE TABLE test_table_status_mysql (id INT AUTO_INCREMENT PRIMARY KEY);

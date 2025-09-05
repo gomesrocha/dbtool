@@ -1,0 +1,8 @@
+
+databases:
+  - name: test_db_status_mysql
+    if_not_exists: create_test_db_mysql.sql
+tables:
+  - database: test_db_status_mysql
+    name: test_table_status_mysql
+    if_not_exists: create_test_table_mysql.sql

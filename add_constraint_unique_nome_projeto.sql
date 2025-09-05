@@ -1,0 +1,1 @@
+ALTER TABLE projetos ADD CONSTRAINT unique_nome_projeto UNIQUE (nome);

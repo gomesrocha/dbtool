@@ -1,3 +1,8 @@
 ---
-databases: []
-tables: []
+databases:
+  - name: pesquisa_mysql
+    if_not_exists: create_db_mysql.sql
+tables:
+  - database: pesquisa_mysql
+    name: users
+    if_not_exists: create_users_table_mysql.sql

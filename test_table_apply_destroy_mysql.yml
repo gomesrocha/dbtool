@@ -1,0 +1,6 @@
+
+databases: []
+tables:
+  - database: mysql
+    name: test_table_apply_destroy_mysql
+    if_not_exists: create_test_table_apply_destroy_mysql.sql
