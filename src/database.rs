@@ -3,6 +3,7 @@ use crate::playbook::{validate_playbook, Playbook};
 use crate::state::DbState;
 use crate::tasks::{Task, TaskStatus};
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, MySql, Pool, Postgres, Transaction};
 use std::io::{self, Write};
 use tokio::fs::File;
@@ -37,18 +38,48 @@ pub async fn apply_playbook(
     let state_path = "dbtools.dbstate";
     let mut state = DbState::load(state_path)?;
 
-    // Filter items not in state
-    let pending_databases: Vec<&crate::playbook::Database> = playbook
-        .databases
-        .iter()
-        .filter(|db| !state.has_database(&db.name))
-        .collect();
+    // Identify pending changes
+    let mut pending_databases: Vec<(&crate::playbook::Database, String, bool)> = Vec::new(); // (db, hash, is_update)
+    let mut pending_tables: Vec<(&crate::playbook::Table, String, bool)> = Vec::new(); // (table, hash, is_update)
 
-    let pending_tables: Vec<&crate::playbook::Table> = playbook
-        .tables
-        .iter()
-        .filter(|table| !state.has_table(&table.database, &table.name))
-        .collect();
+    for db in &playbook.databases {
+        let hash = calculate_file_hash(&db.if_not_exists).await?;
+        if let Some(stored_hash) = state.get_database_hash(&db.name) {
+            // If stored hash is empty (legacy migration), assume sync but we will update it later.
+            // Actually, if it is empty, we should treat it as "needs update of state, but not DB".
+            if !stored_hash.is_empty() && stored_hash != &hash {
+                info!("Database {} has changed (hash mismatch)", db.name);
+                pending_databases.push((db, hash, true));
+            } else if stored_hash.is_empty() {
+                // Legacy case: update the hash in state implicitly by adding it to "pending" but logic will differ?
+                // No, if we add it to pending, it tries to create it.
+                // We need to just update the state if it exists.
+                // Let's add it to pending with is_update=false, but check existence logic handles it.
+                // Wait, if I add it to pending, `check_database` will run.
+                // `check_database` checks existence. If exists -> updates state.
+                // So adding it to pending is CORRECT for legacy case too!
+                // Because `check_database_...` returns true, then we `state.add_database` with new hash.
+                pending_databases.push((db, hash, false));
+            }
+        } else if !state.has_database(&db.name) {
+             pending_databases.push((db, hash, false));
+        }
+    }
+
+    for table in &playbook.tables {
+        let hash = calculate_file_hash(&table.if_not_exists).await?;
+        if let Some(stored_hash) = state.get_table_hash(&table.database, &table.name) {
+             if !stored_hash.is_empty() && stored_hash != &hash {
+                info!("Table {}.{} has changed (hash mismatch)", table.database, table.name);
+                pending_tables.push((table, hash, true));
+            } else if stored_hash.is_empty() {
+                 // Legacy case: Add to pending so we check existence and update hash.
+                 pending_tables.push((table, hash, false));
+            }
+        } else if !state.has_table(&table.database, &table.name) {
+             pending_tables.push((table, hash, false));
+        }
+    }
 
     if pending_databases.is_empty() && pending_tables.is_empty() {
         info!("No changes needed (state matches playbook).");
@@ -56,11 +87,19 @@ pub async fn apply_playbook(
     }
 
     info!("Execution Plan (Changes to be applied):");
-    for db in &pending_databases {
-        info!("  + Database: {}", db.name);
+    for (db, _, is_update) in &pending_databases {
+        if *is_update {
+             info!("  ~ Database: {} (Update detected - Manual intervention might be required)", db.name);
+        } else {
+             info!("  + Database: {}", db.name);
+        }
     }
-    for table in &pending_tables {
-        info!("  + Table: {}.{}", table.database, table.name);
+    for (table, _, is_update) in &pending_tables {
+        if *is_update {
+            info!("  ~ Table: {}.{} (Update detected - SQL changed)", table.database, table.name);
+        } else {
+            info!("  + Table: {}.{}", table.database, table.name);
+        }
     }
 
     if dry_run {
@@ -103,8 +142,18 @@ pub async fn apply_playbook(
     let mut tasks: Vec<Task> = Vec::new();
 
     // Process databases
-    for db in pending_databases {
+    for (db, hash, is_update) in pending_databases {
         let task_name = format!("check_database_{}", db.name);
+
+        if is_update {
+             warn!("Database {} definition changed. Skipping auto-apply as it might fail or cause data loss. Please update manually or destroy first.", db.name);
+             tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Skipped,
+            });
+             continue;
+        }
+
         let exists = match &pool {
             DbPool::Postgres(pg_pool) => check_database_exists_postgres(pg_pool, &db.name).await?,
             DbPool::MySQL(mysql_pool) => check_database_exists_mysql(mysql_pool, &db.name).await?,
@@ -116,7 +165,7 @@ pub async fn apply_playbook(
                 status: TaskStatus::Skipped,
             });
             info!("Database {} already exists, updating state", db.name);
-            state.add_database(db.name.clone());
+            state.add_database(db.name.clone(), hash);
             state.save(state_path)?;
             continue;
         }
@@ -128,7 +177,7 @@ pub async fn apply_playbook(
                     status: TaskStatus::Success,
                 });
                 info!("Created database {}", db.name);
-                state.add_database(db.name.clone());
+                state.add_database(db.name.clone(), hash);
                 state.save(state_path)?;
             }
             Err(e) => {
@@ -164,8 +213,18 @@ pub async fn apply_playbook(
         None
     };
 
-    for table in pending_tables {
+    for (table, hash, is_update) in pending_tables {
         let task_name = format!("check_table_{}_{}", table.database, table.name);
+
+        if is_update {
+            warn!("Table {}.{} definition changed. Skipping auto-apply. Please update manually or destroy first.", table.database, table.name);
+            tasks.push(Task {
+               name: task_name.clone(),
+               status: TaskStatus::Skipped,
+           });
+            continue;
+       }
+
         let exists = match &pool {
             DbPool::Postgres(pg_pool) => check_table_exists_postgres(pg_pool, &table.name).await?,
             DbPool::MySQL(mysql_pool) => check_table_exists_mysql(mysql_pool, &table.name).await?,
@@ -180,7 +239,7 @@ pub async fn apply_playbook(
                 "Table {}.{} already exists, updating state",
                 table.database, table.name
             );
-            state.add_table(table.database.clone(), table.name.clone());
+            state.add_table(table.database.clone(), table.name.clone(), hash);
             state.save(state_path)?;
             continue;
         }
@@ -192,7 +251,7 @@ pub async fn apply_playbook(
                     status: TaskStatus::Success,
                 });
                 info!("Created table {}.{}", table.database, table.name);
-                state.add_table(table.database.clone(), table.name.clone());
+                state.add_table(table.database.clone(), table.name.clone(), hash);
                 state.save(state_path)?;
             }
             Err(e) => {
@@ -544,4 +603,49 @@ async fn execute_sql_file(pool: &DbPool, file_path: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn calculate_file_hash(file_path: &str) -> Result<String> {
+    let mut file = File::open(file_path).await.context(format!("Failed to open file for hashing: {}", file_path))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 1024];
+
+    loop {
+        let count = file.read(&mut buffer).await?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn test_calculate_file_hash() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        writeln!(file, "CREATE TABLE test (id INT);")?;
+        let path = file.path().to_str().unwrap().to_string();
+
+        let hash = calculate_file_hash(&path).await?;
+        assert!(!hash.is_empty());
+
+        // Modify file
+        writeln!(file, "ALTER TABLE test ADD COLUMN name TEXT;")?;
+        // We need to re-open or seek to ensure we are writing correctly for the test,
+        // but NamedTempFile stays open. However, calculate_file_hash opens by path.
+        // Let's ensure the write is flushed.
+        file.flush()?;
+
+        let hash2 = calculate_file_hash(&path).await?;
+        assert_ne!(hash, hash2);
+
+        Ok(())
+    }
 }
