@@ -22,6 +22,7 @@
   - `plan`: Shows what would be done without applying any changes.
   - `apply`: Applies the changes defined in the playbook, with rollback support for tables.
   - `destroy`: Removes databases and tables defined in the playbook (use with caution).
+  - `serve`: Starts a web server to manage the database schema.
 - **Rollback**: Reverts partial changes to tables in case of errors (not applicable to databases).
 - **Detailed Logs**: Records all actions, including executed SQL and errors.
 
@@ -118,6 +119,18 @@ CREATE TABLE IF NOT EXISTS users (
     ./target/release/dbtool destroy --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres
     ```
 
+7.  **Start Web Server**:
+    Start the web interface to manage changes.
+    ```bash
+    ./target/release/dbtool serve --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres --port 3000 --username admin --password password
+    ```
+    Or using environment variables for credentials:
+    ```bash
+    export DBTOOLS_USER=admin
+    export DBTOOLS_PASS=password
+    ./target/release/dbtool serve --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres
+    ```
+
 ## Development & Testing
 
 This project includes a suite of integration tests. To run the tests, you'll need a running PostgreSQL instance.
@@ -177,6 +190,7 @@ For questions or suggestions, please open an issue at [https://github.com/gomesr
   - `plan`: Mostra o que será feito sem aplicar mudanças.
   - `apply`: Aplica as mudanças definidas no playbook, com suporte a rollback para tabelas.
   - `destroy`: Remove bancos e tabelas definidos no playbook (use com cuidado).
+  - `serve`: Inicia um servidor web para gerenciar o esquema do banco de dados.
 - **Rollback**: Reverte mudanças parciais em tabelas em caso de erros (exceto para bancos).
 - **Logs Detalhados**: Registra todas as ações, incluindo SQL executado e erros.
 
@@ -271,6 +285,18 @@ CREATE TABLE IF NOT EXISTS users (
     **Cuidado**: Este comando deleta bancos e tabelas.
     ```bash
     ./target/release/dbtool destroy --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres
+    ```
+
+7.  **Iniciar Servidor Web**:
+    Inicia a interface web para gerenciar mudanças.
+    ```bash
+    ./target/release/dbtool serve --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres --port 3000 --username admin --password password
+    ```
+    Ou usando variáveis de ambiente para credenciais:
+    ```bash
+    export DBTOOLS_USER=admin
+    export DBTOOLS_PASS=password
+    ./target/release/dbtool serve --playbook playbook.yml --db-url postgres://postgres:postgres@localhost:5432/postgres
     ```
 
 ## Desenvolvimento e Testes
