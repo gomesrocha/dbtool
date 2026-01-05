@@ -18,6 +18,8 @@ tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.6.8", features = ["fs", "trace", "cors"] }
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
 base64 = "0.22.1"
+sha2 = "0.10.9"
+hex = "0.4.3"
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -25,3 +27,4 @@ sqlx = { version = "0.7", features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1.0", features = ["full"] }
 predicates = "3"
 reqwest = { version = "0.13.1", features = ["json"] }
+tempfile = "3.24.0"
