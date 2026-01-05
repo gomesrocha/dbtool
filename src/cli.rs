@@ -26,6 +26,8 @@ pub enum Commands {
         no_rollback: bool,
         #[clap(long, value_enum, default_value = "postgres")]
         db_type: DbType,
+        #[clap(long, default_value = "false")]
+        auto_approve: bool,
     },
     Plan {
         #[clap(long)]
@@ -72,11 +74,11 @@ pub enum Commands {
 pub async fn run(cli: Cli) -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     match cli.command {
-        Commands::Apply { playbook, db_url, no_rollback, db_type } => {
-            apply_playbook(&playbook, &db_url, false, !no_rollback, db_type).await
+        Commands::Apply { playbook, db_url, no_rollback, db_type, auto_approve } => {
+            apply_playbook(&playbook, &db_url, false, !no_rollback, db_type, auto_approve).await
         }
         Commands::Plan { playbook, db_url, db_type } => {
-            apply_playbook(&playbook, &db_url, true, false, db_type).await
+            apply_playbook(&playbook, &db_url, true, false, db_type, false).await
         }
         Commands::Init { playbook } => {
             init_playbook(&playbook).await
