@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS test_table_apply_destroy (id SERIAL PRIMARY KEY);

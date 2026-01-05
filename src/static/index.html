@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DBTools Web Interface</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .section { margin-bottom: 20px; border: 1px solid #ccc; padding: 10px; }
+        .success { color: green; }
+        .missing { color: red; }
+    </style>
+</head>
+<body>
+    <h1>DBTools Web Interface</h1>
+
+    <div id="main-content">
+        <div class="section">
+            <h2>Status <button onclick="fetchStatus()">Refresh</button></h2>
+            <div id="status-display">Loading...</div>
+        </div>
+
+        <div class="section">
+            <h2>Actions</h2>
+            <button onclick="applyChanges()">Apply Changes</button>
+            <div id="action-result"></div>
+        </div>
+
+        <div class="section">
+            <h2>Add Demand</h2>
+            <select id="demand-kind" onchange="toggleDemandFields()">
+                <option value="database">Database</option>
+                <option value="table">Table</option>
+            </select>
+            <input type="text" id="demand-name" placeholder="Name (alphanumeric only)">
+            <input type="text" id="demand-db" placeholder="Database Name (for table)" style="display:none;">
+            <br><br>
+            <textarea id="demand-sql" rows="5" cols="50" placeholder="SQL Content"></textarea>
+            <br>
+            <button onclick="addDemand()">Add Demand</button>
+            <div id="demand-result"></div>
+        </div>
+    </div>
+
+    <script>
+        // We rely on browser Basic Auth. If the user loads this page, they are authenticated.
+
+        function toggleDemandFields() {
+            const kind = document.getElementById('demand-kind').value;
+            document.getElementById('demand-db').style.display = kind === 'table' ? 'inline-block' : 'none';
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                if (res.status === 401) {
+                    location.reload(); // Trigger auth prompt
+                    return;
+                }
+                const data = await res.json();
+                let html = '<h3>Databases</h3><ul>';
+                data.databases.forEach(db => {
+                    html += `<li class="${db.exists ? 'success' : 'missing'}">${db.name} (${db.exists ? 'Exists' : 'Missing'})</li>`;
+                });
+                html += '</ul><h3>Tables</h3><ul>';
+                data.tables.forEach(table => {
+                    html += `<li class="${table.exists ? 'success' : 'missing'}">${table.database}.${table.name} (${table.exists ? 'Exists' : 'Missing'})</li>`;
+                });
+                html += '</ul>';
+                document.getElementById('status-display').innerHTML = html;
+            } catch (e) {
+                document.getElementById('status-display').innerText = "Error fetching status";
+            }
+        }
+
+        async function applyChanges() {
+            document.getElementById('action-result').innerText = "Applying...";
+            try {
+                const res = await fetch('/api/apply', { method: 'POST' });
+                if (res.ok) {
+                    document.getElementById('action-result').innerText = "Applied successfully!";
+                    fetchStatus();
+                } else {
+                    document.getElementById('action-result').innerText = "Failed to apply.";
+                }
+            } catch (e) {
+                document.getElementById('action-result').innerText = "Error applying.";
+            }
+        }
+
+        async function addDemand() {
+            const kind = document.getElementById('demand-kind').value;
+            const name = document.getElementById('demand-name').value;
+            const db = document.getElementById('demand-db').value;
+            const sql = document.getElementById('demand-sql').value;
+
+            const payload = {
+                kind,
+                name,
+                database: kind === 'table' ? db : null,
+                sql_content: sql
+            };
+
+            try {
+                const res = await fetch('/api/demand', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    document.getElementById('demand-result').innerText = "Demand added!";
+                    fetchStatus();
+                } else {
+                    document.getElementById('demand-result').innerText = "Failed to add demand (check name format).";
+                }
+            } catch (e) {
+                document.getElementById('demand-result').innerText = "Error adding demand.";
+            }
+        }
+
+        // Initial load
+        fetchStatus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+
+databases:
+  - name: test_db_status
+    if_not_exists: create_test_db_status.sql
+tables:
+  - database: test_db_status
+    name: test_table_status
+    if_not_exists: create_test_table_status.sql
