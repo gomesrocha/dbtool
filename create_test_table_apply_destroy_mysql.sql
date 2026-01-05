@@ -1,1 +1,0 @@
-CREATE TABLE test_table_apply_destroy_mysql (id INT AUTO_INCREMENT PRIMARY KEY);

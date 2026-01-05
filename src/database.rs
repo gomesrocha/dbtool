@@ -3,9 +3,11 @@ use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, MySql, Pool, Postgr
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{error, info, warn};
+use std::io::{self, Write};
 use crate::cli::DbType;
 use crate::playbook::{Playbook, validate_playbook};
 use crate::tasks::{Task, TaskStatus};
+use crate::state::DbState;
 
 pub enum DbPool {
     Postgres(Pool<Postgres>),
@@ -17,13 +19,55 @@ pub enum DbTransaction<'a> {
     MySQL(Transaction<'a, MySql>),
 }
 
-pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, rollback: bool, db_type: DbType) -> Result<()> {
+pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, rollback: bool, db_type: DbType, auto_approve: bool) -> Result<()> {
     info!("Reading playbook from: {}", playbook_path);
     let playbook_content = std::fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
     info!("Playbook content:\n{}", playbook_content);
     let playbook: Playbook = serde_yaml::from_str(&playbook_content)
         .context("Failed to parse playbook YAML")?;
+
+    let state_path = "dbtools.dbstate";
+    let mut state = DbState::load(state_path)?;
+
+    // Filter items not in state
+    let pending_databases: Vec<&crate::playbook::Database> = playbook.databases.iter()
+        .filter(|db| !state.has_database(&db.name))
+        .collect();
+
+    let pending_tables: Vec<&crate::playbook::Table> = playbook.tables.iter()
+        .filter(|table| !state.has_table(&table.database, &table.name))
+        .collect();
+
+    if pending_databases.is_empty() && pending_tables.is_empty() {
+        info!("No changes needed (state matches playbook).");
+        return Ok(());
+    }
+
+    info!("Execution Plan (Changes to be applied):");
+    for db in &pending_databases {
+        info!("  + Database: {}", db.name);
+    }
+    for table in &pending_tables {
+        info!("  + Table: {}.{}", table.database, table.name);
+    }
+
+    if dry_run {
+        return Ok(());
+    }
+
+    // Interactive confirmation
+    if !auto_approve {
+        print!("Do you want to proceed? (yes/no): ");
+        io::stdout().flush().context("Failed to flush stdout")?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).context("Failed to read stdin")?;
+        let trimmed = input.trim().to_lowercase();
+        if trimmed != "yes" && trimmed != "y" {
+            info!("Operation cancelled by user.");
+            return Ok(());
+        }
+    }
 
     info!("Using database URL: {}", db_url);
     let pool = match db_type {
@@ -46,7 +90,7 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
     let mut tasks: Vec<Task> = Vec::new();
 
     // Process databases
-    for db in &playbook.databases {
+    for db in pending_databases {
         let task_name = format!("check_database_{}", db.name);
         let exists = match &pool {
             DbPool::Postgres(pg_pool) => check_database_exists_postgres(pg_pool, &db.name).await?,
@@ -55,13 +99,9 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
 
         if exists {
             tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
-            info!("Database {} already exists, skipping", db.name);
-            continue;
-        }
-
-        if dry_run {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
-            info!("[PLAN] Would create database {}", db.name);
+            info!("Database {} already exists, updating state", db.name);
+            state.add_database(db.name.clone());
+            state.save(state_path)?;
             continue;
         }
 
@@ -69,6 +109,8 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
             Ok(_) => {
                 tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
                 info!("Created database {}", db.name);
+                state.add_database(db.name.clone());
+                state.save(state_path)?;
             }
             Err(e) => {
                 tasks.push(Task { name: task_name.clone(), status: TaskStatus::Failed(e.to_string()) });
@@ -78,7 +120,7 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
     }
 
     // Process tables (with transaction for rollback)
-    let mut tx = if rollback && !dry_run {
+    let mut tx = if rollback {
         match &pool {
             DbPool::Postgres(pg_pool) => Some(DbTransaction::Postgres(
                 pg_pool.begin().await.context("Failed to start PostgreSQL transaction")?,
@@ -91,7 +133,7 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
         None
     };
 
-    for table in &playbook.tables {
+    for table in pending_tables {
         let task_name = format!("check_table_{}_{}", table.database, table.name);
         let exists = match &pool {
             DbPool::Postgres(pg_pool) => check_table_exists_postgres(pg_pool, &table.name).await?,
@@ -100,13 +142,9 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
 
         if exists {
             tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
-            info!("Table {}.{} already exists, skipping", table.database, table.name);
-            continue;
-        }
-
-        if dry_run {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
-            info!("[PLAN] Would create table {}.{}", table.database, table.name);
+            info!("Table {}.{} already exists, updating state", table.database, table.name);
+            state.add_table(table.database.clone(), table.name.clone());
+            state.save(state_path)?;
             continue;
         }
 
@@ -114,6 +152,8 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
             Ok(_) => {
                 tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
                 info!("Created table {}.{}", table.database, table.name);
+                state.add_table(table.database.clone(), table.name.clone());
+                state.save(state_path)?;
             }
             Err(e) => {
                 tasks.push(Task { name: task_name.clone(), status: TaskStatus::Failed(e.to_string()) });
