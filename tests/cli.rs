@@ -39,7 +39,10 @@ tables:
     fs::write(&playbook_path, playbook_content)?;
     fs::write(
         &sql_path,
-        format!("CREATE TABLE IF NOT EXISTS {} (id SERIAL PRIMARY KEY);", table_name),
+        format!(
+            "CREATE TABLE IF NOT EXISTS {} (id SERIAL PRIMARY KEY);",
+            table_name
+        ),
     )?;
 
     // Apply (using --auto-approve to verify the flag)
@@ -57,12 +60,10 @@ tables:
 
     // Verify creation
     let pool = PgPoolOptions::new().connect(PG_DB_URL).await?;
-    let row = sqlx::query(
-        "SELECT 1 FROM information_schema.tables WHERE table_name = $1",
-    )
-    .bind(table_name)
-    .fetch_optional(&pool)
-    .await?;
+    let row = sqlx::query("SELECT 1 FROM information_schema.tables WHERE table_name = $1")
+        .bind(table_name)
+        .fetch_optional(&pool)
+        .await?;
     assert!(row.is_some());
 
     // Destroy
@@ -78,12 +79,10 @@ tables:
     cmd_destroy.assert().success();
 
     // Verify destruction
-    let row = sqlx::query(
-        "SELECT 1 FROM information_schema.tables WHERE table_name = $1",
-    )
-    .bind(table_name)
-    .fetch_optional(&pool)
-    .await?;
+    let row = sqlx::query("SELECT 1 FROM information_schema.tables WHERE table_name = $1")
+        .bind(table_name)
+        .fetch_optional(&pool)
+        .await?;
     assert!(row.is_none());
 
     // Clean up state file if exists
@@ -116,7 +115,10 @@ tables:
     fs::write(&playbook_path, playbook_content)?;
     fs::write(
         &sql_path,
-        format!("CREATE TABLE IF NOT EXISTS {} (id INT AUTO_INCREMENT PRIMARY KEY);", table_name),
+        format!(
+            "CREATE TABLE IF NOT EXISTS {} (id INT AUTO_INCREMENT PRIMARY KEY);",
+            table_name
+        ),
     )?;
 
     // Apply
@@ -198,9 +200,10 @@ tables: []
         .arg("postgres");
 
     // Update expected output
-    cmd_plan.assert().success().stdout(contains(
-        &format!("+ Database: {}", db_name),
-    ));
+    cmd_plan
+        .assert()
+        .success()
+        .stdout(contains(&format!("+ Database: {}", db_name)));
 
     // Apply (using write_stdin to provide confirmation)
     let mut cmd_apply = Command::cargo_bin("dbtool")?;
@@ -280,9 +283,10 @@ tables: []
         .arg(MYSQL_DB_URL)
         .arg("--db-type")
         .arg("my-sql");
-    cmd_plan.assert().success().stdout(contains(
-        &format!("+ Database: {}", db_name),
-    ));
+    cmd_plan
+        .assert()
+        .success()
+        .stdout(contains(&format!("+ Database: {}", db_name)));
 
     // Apply
     let mut cmd_apply = Command::cargo_bin("dbtool")?;
@@ -400,7 +404,10 @@ tables:
 
     fs::write(playbook_path, &playbook_content)?;
     fs::write(sql_db_path, format!("CREATE DATABASE {};", db_name))?;
-    fs::write(sql_table_path, format!("CREATE TABLE {} (id SERIAL PRIMARY KEY);", table_name))?;
+    fs::write(
+        sql_table_path,
+        format!("CREATE TABLE {} (id SERIAL PRIMARY KEY);", table_name),
+    )?;
 
     // Apply to create database and table
     let mut cmd_apply = Command::cargo_bin("dbtool")?;
@@ -431,7 +438,10 @@ tables:
         .assert()
         .success()
         .stdout(contains(format!("- Database {}: Exists", db_name)))
-        .stdout(contains(format!("- Table {}.{}: Exists", db_name, table_name)));
+        .stdout(contains(format!(
+            "- Table {}.{}: Exists",
+            db_name, table_name
+        )));
 
     // Clean up
     let mut cmd_destroy = Command::cargo_bin("dbtool")?;
@@ -454,7 +464,7 @@ tables:
 
 #[tokio::test]
 async fn test_status_command_mysql() -> Result<()> {
-     if MySqlPoolOptions::new().connect(MYSQL_DB_URL).await.is_err() {
+    if MySqlPoolOptions::new().connect(MYSQL_DB_URL).await.is_err() {
         println!("Skipping MySQL test: connection failed");
         return Ok(());
     }
@@ -480,7 +490,13 @@ tables:
 
     fs::write(playbook_path, &playbook_content)?;
     fs::write(sql_db_path, format!("CREATE DATABASE {};", db_name))?;
-    fs::write(sql_table_path, format!("CREATE TABLE {} (id INT AUTO_INCREMENT PRIMARY KEY);", table_name))?;
+    fs::write(
+        sql_table_path,
+        format!(
+            "CREATE TABLE {} (id INT AUTO_INCREMENT PRIMARY KEY);",
+            table_name
+        ),
+    )?;
 
     // Apply
     let mut cmd_apply = Command::cargo_bin("dbtool")?;
@@ -509,7 +525,10 @@ tables:
         .assert()
         .success()
         .stdout(contains(format!("- Database {}: Exists", db_name)))
-        .stdout(contains(format!("- Table {}.{}: Exists", db_name, table_name)));
+        .stdout(contains(format!(
+            "- Table {}.{}: Exists",
+            db_name, table_name
+        )));
 
     // Clean up
     let mut cmd_destroy = Command::cargo_bin("dbtool")?;

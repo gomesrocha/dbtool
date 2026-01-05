@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use dbtool::cli::{Cli, run};
+use dbtool::cli::{run, Cli};
 
 #[tokio::main]
 async fn main() -> Result<()> {

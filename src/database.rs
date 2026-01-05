@@ -1,13 +1,13 @@
+use crate::cli::DbType;
+use crate::playbook::{validate_playbook, Playbook};
+use crate::state::DbState;
+use crate::tasks::{Task, TaskStatus};
 use anyhow::{Context, Result};
 use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, MySql, Pool, Postgres, Transaction};
+use std::io::{self, Write};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{error, info, warn};
-use std::io::{self, Write};
-use crate::cli::DbType;
-use crate::playbook::{Playbook, validate_playbook};
-use crate::tasks::{Task, TaskStatus};
-use crate::state::DbState;
 
 pub enum DbPool {
     Postgres(Pool<Postgres>),
@@ -19,23 +19,34 @@ pub enum DbTransaction<'a> {
     MySQL(Transaction<'a, MySql>),
 }
 
-pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, rollback: bool, db_type: DbType, auto_approve: bool) -> Result<()> {
+pub async fn apply_playbook(
+    playbook_path: &str,
+    db_url: &str,
+    dry_run: bool,
+    rollback: bool,
+    db_type: DbType,
+    auto_approve: bool,
+) -> Result<()> {
     info!("Reading playbook from: {}", playbook_path);
     let playbook_content = std::fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
     info!("Playbook content:\n{}", playbook_content);
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content)
-        .context("Failed to parse playbook YAML")?;
+    let playbook: Playbook =
+        serde_yaml::from_str(&playbook_content).context("Failed to parse playbook YAML")?;
 
     let state_path = "dbtools.dbstate";
     let mut state = DbState::load(state_path)?;
 
     // Filter items not in state
-    let pending_databases: Vec<&crate::playbook::Database> = playbook.databases.iter()
+    let pending_databases: Vec<&crate::playbook::Database> = playbook
+        .databases
+        .iter()
         .filter(|db| !state.has_database(&db.name))
         .collect();
 
-    let pending_tables: Vec<&crate::playbook::Table> = playbook.tables.iter()
+    let pending_tables: Vec<&crate::playbook::Table> = playbook
+        .tables
+        .iter()
         .filter(|table| !state.has_table(&table.database, &table.name))
         .collect();
 
@@ -61,7 +72,9 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
         print!("Do you want to proceed? (yes/no): ");
         io::stdout().flush().context("Failed to flush stdout")?;
         let mut input = String::new();
-        io::stdin().read_line(&mut input).context("Failed to read stdin")?;
+        io::stdin()
+            .read_line(&mut input)
+            .context("Failed to read stdin")?;
         let trimmed = input.trim().to_lowercase();
         if trimmed != "yes" && trimmed != "y" {
             info!("Operation cancelled by user.");
@@ -98,7 +111,10 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
         };
 
         if exists {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Skipped,
+            });
             info!("Database {} already exists, updating state", db.name);
             state.add_database(db.name.clone());
             state.save(state_path)?;
@@ -107,14 +123,23 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
 
         match execute_sql_file(&pool, &db.if_not_exists).await {
             Ok(_) => {
-                tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
+                tasks.push(Task {
+                    name: task_name.clone(),
+                    status: TaskStatus::Success,
+                });
                 info!("Created database {}", db.name);
                 state.add_database(db.name.clone());
                 state.save(state_path)?;
             }
             Err(e) => {
-                tasks.push(Task { name: task_name.clone(), status: TaskStatus::Failed(e.to_string()) });
-                error!("Failed to create database {}: {}. Rollback not supported for databases.", db.name, e);
+                tasks.push(Task {
+                    name: task_name.clone(),
+                    status: TaskStatus::Failed(e.to_string()),
+                });
+                error!(
+                    "Failed to create database {}: {}. Rollback not supported for databases.",
+                    db.name, e
+                );
             }
         }
     }
@@ -123,10 +148,16 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
     let mut tx = if rollback {
         match &pool {
             DbPool::Postgres(pg_pool) => Some(DbTransaction::Postgres(
-                pg_pool.begin().await.context("Failed to start PostgreSQL transaction")?,
+                pg_pool
+                    .begin()
+                    .await
+                    .context("Failed to start PostgreSQL transaction")?,
             )),
             DbPool::MySQL(mysql_pool) => Some(DbTransaction::MySQL(
-                mysql_pool.begin().await.context("Failed to start MySQL transaction")?,
+                mysql_pool
+                    .begin()
+                    .await
+                    .context("Failed to start MySQL transaction")?,
             )),
         }
     } else {
@@ -141,8 +172,14 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
         };
 
         if exists {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
-            info!("Table {}.{} already exists, updating state", table.database, table.name);
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Skipped,
+            });
+            info!(
+                "Table {}.{} already exists, updating state",
+                table.database, table.name
+            );
             state.add_table(table.database.clone(), table.name.clone());
             state.save(state_path)?;
             continue;
@@ -150,19 +187,34 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
 
         match execute_sql_file(&pool, &table.if_not_exists).await {
             Ok(_) => {
-                tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
+                tasks.push(Task {
+                    name: task_name.clone(),
+                    status: TaskStatus::Success,
+                });
                 info!("Created table {}.{}", table.database, table.name);
                 state.add_table(table.database.clone(), table.name.clone());
                 state.save(state_path)?;
             }
             Err(e) => {
-                tasks.push(Task { name: task_name.clone(), status: TaskStatus::Failed(e.to_string()) });
-                error!("Failed to create table {}.{}: {}", table.database, table.name, e);
+                tasks.push(Task {
+                    name: task_name.clone(),
+                    status: TaskStatus::Failed(e.to_string()),
+                });
+                error!(
+                    "Failed to create table {}.{}: {}",
+                    table.database, table.name, e
+                );
                 if let Some(tx_inner) = tx.take() {
                     warn!("Rolling back transaction due to error");
                     match tx_inner {
-                        DbTransaction::Postgres(pg_tx) => pg_tx.rollback().await.context("Failed to rollback PostgreSQL transaction")?,
-                        DbTransaction::MySQL(mysql_tx) => mysql_tx.rollback().await.context("Failed to rollback MySQL transaction")?,
+                        DbTransaction::Postgres(pg_tx) => pg_tx
+                            .rollback()
+                            .await
+                            .context("Failed to rollback PostgreSQL transaction")?,
+                        DbTransaction::MySQL(mysql_tx) => mysql_tx
+                            .rollback()
+                            .await
+                            .context("Failed to rollback MySQL transaction")?,
                     }
                 }
                 return Err(e);
@@ -173,8 +225,14 @@ pub async fn apply_playbook(playbook_path: &str, db_url: &str, dry_run: bool, ro
     // Commit transaction if no errors
     if let Some(tx_inner) = tx {
         match tx_inner {
-            DbTransaction::Postgres(pg_tx) => pg_tx.commit().await.context("Failed to commit PostgreSQL transaction")?,
-            DbTransaction::MySQL(mysql_tx) => mysql_tx.commit().await.context("Failed to commit MySQL transaction")?,
+            DbTransaction::Postgres(pg_tx) => pg_tx
+                .commit()
+                .await
+                .context("Failed to commit PostgreSQL transaction")?,
+            DbTransaction::MySQL(mysql_tx) => mysql_tx
+                .commit()
+                .await
+                .context("Failed to commit MySQL transaction")?,
         }
     }
 
@@ -214,8 +272,8 @@ pub async fn test_playbook(playbook_path: &str, db_url: &str, db_type: DbType) -
 
     let playbook_content = std::fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content)
-        .context("Failed to parse playbook YAML")?;
+    let playbook: Playbook =
+        serde_yaml::from_str(&playbook_content).context("Failed to parse playbook YAML")?;
 
     for db in &playbook.databases {
         let exists = match &pool {
@@ -238,8 +296,8 @@ pub async fn status(playbook_path: &str, db_url: &str, db_type: DbType) -> Resul
     info!("Checking status for playbook: {}", playbook_path);
     let playbook_content = std::fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content)
-        .context("Failed to parse playbook YAML")?;
+    let playbook: Playbook =
+        serde_yaml::from_str(&playbook_content).context("Failed to parse playbook YAML")?;
 
     let pool = match db_type {
         DbType::Postgres => DbPool::Postgres(
@@ -291,8 +349,8 @@ pub async fn destroy_playbook(playbook_path: &str, db_url: &str, db_type: DbType
     info!("Destroying resources from playbook: {}", playbook_path);
     let playbook_content = std::fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content)
-        .context("Failed to parse playbook YAML")?;
+    let playbook: Playbook =
+        serde_yaml::from_str(&playbook_content).context("Failed to parse playbook YAML")?;
 
     let pool = match db_type {
         DbType::Postgres => DbPool::Postgres(
@@ -327,23 +385,35 @@ pub async fn destroy_playbook(playbook_path: &str, db_url: &str, db_type: DbType
             };
             match &pool {
                 DbPool::Postgres(pg_pool) => {
-                    sqlx::query(&query)
-                        .execute(pg_pool)
-                        .await
-                        .context(format!("Failed to drop table {}.{}", table.database, table.name))?;
+                    sqlx::query(&query).execute(pg_pool).await.context(format!(
+                        "Failed to drop table {}.{}",
+                        table.database, table.name
+                    ))?;
                 }
                 DbPool::MySQL(mysql_pool) => {
                     sqlx::query(&query)
                         .execute(mysql_pool)
                         .await
-                        .context(format!("Failed to drop table {}.{}", table.database, table.name))?;
+                        .context(format!(
+                            "Failed to drop table {}.{}",
+                            table.database, table.name
+                        ))?;
                 }
             }
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Success,
+            });
             info!("Dropped table {}.{}", table.database, table.name);
         } else {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
-            info!("Table {}.{} does not exist, skipping", table.database, table.name);
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Skipped,
+            });
+            info!(
+                "Table {}.{} does not exist, skipping",
+                table.database, table.name
+            );
         }
     }
 
@@ -369,10 +439,16 @@ pub async fn destroy_playbook(playbook_path: &str, db_url: &str, db_type: DbType
                         .context(format!("Failed to drop database {}", db.name))?;
                 }
             }
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Success });
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Success,
+            });
             info!("Dropped database {}", db.name);
         } else {
-            tasks.push(Task { name: task_name.clone(), status: TaskStatus::Skipped });
+            tasks.push(Task {
+                name: task_name.clone(),
+                status: TaskStatus::Skipped,
+            });
             info!("Database {} does not exist, skipping", db.name);
         }
     }
@@ -390,30 +466,36 @@ pub async fn destroy_playbook(playbook_path: &str, db_url: &str, db_type: DbType
     Ok(())
 }
 
-async fn check_database_exists_postgres(pool: &Pool<Postgres>, db_name: &str) -> Result<bool> {
+pub async fn check_database_exists_postgres(pool: &Pool<Postgres>, db_name: &str) -> Result<bool> {
     info!("Checking if PostgreSQL database {} exists", db_name);
-    let row: (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
-        .bind(db_name)
-        .fetch_one(pool)
-        .await
-        .context(format!("Failed to check existence of database {}", db_name))?;
+    let row: (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(db_name)
+            .fetch_one(pool)
+            .await
+            .context(format!("Failed to check existence of database {}", db_name))?;
     info!("Database {} exists: {}", db_name, row.0);
     Ok(row.0)
 }
 
-async fn check_database_exists_mysql(pool: &Pool<MySql>, db_name: &str) -> Result<bool> {
+pub async fn check_database_exists_mysql(pool: &Pool<MySql>, db_name: &str) -> Result<bool> {
     info!("Checking if MySQL database {} exists", db_name);
-    let row: (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = ?)")
-        .bind(db_name)
-        .fetch_one(pool)
-        .await
-        .context(format!("Failed to check existence of database {}", db_name))?;
+    let row: (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = ?)",
+    )
+    .bind(db_name)
+    .fetch_one(pool)
+    .await
+    .context(format!("Failed to check existence of database {}", db_name))?;
     info!("Database {} exists: {}", db_name, row.0);
     Ok(row.0)
 }
 
-async fn check_table_exists_postgres(pool: &Pool<Postgres>, table_name: &str) -> Result<bool> {
-    info!("Checking if PostgreSQL table {} exists in schema 'public'", table_name);
+pub async fn check_table_exists_postgres(pool: &Pool<Postgres>, table_name: &str) -> Result<bool> {
+    info!(
+        "Checking if PostgreSQL table {} exists in schema 'public'",
+        table_name
+    );
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)"
     )
@@ -425,7 +507,7 @@ async fn check_table_exists_postgres(pool: &Pool<Postgres>, table_name: &str) ->
     Ok(row.0)
 }
 
-async fn check_table_exists_mysql(pool: &Pool<MySql>, table_name: &str) -> Result<bool> {
+pub async fn check_table_exists_mysql(pool: &Pool<MySql>, table_name: &str) -> Result<bool> {
     info!("Checking if MySQL table {} exists", table_name);
     let row: (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?)"
@@ -451,16 +533,14 @@ async fn execute_sql_file(pool: &DbPool, file_path: &str) -> Result<()> {
     info!("Executing SQL:\n{}", sql);
     match pool {
         DbPool::Postgres(pg_pool) => {
-            sqlx::query(&sql)
-                .execute(pg_pool)
-                .await
-                .map_err(|e| anyhow::anyhow!("SQL execution failed: {} (file: {})", e, file_path))?;
+            sqlx::query(&sql).execute(pg_pool).await.map_err(|e| {
+                anyhow::anyhow!("SQL execution failed: {} (file: {})", e, file_path)
+            })?;
         }
         DbPool::MySQL(mysql_pool) => {
-            sqlx::query(&sql)
-                .execute(mysql_pool)
-                .await
-                .map_err(|e| anyhow::anyhow!("SQL execution failed: {} (file: {})", e, file_path))?;
+            sqlx::query(&sql).execute(mysql_pool).await.map_err(|e| {
+                anyhow::anyhow!("SQL execution failed: {} (file: {})", e, file_path)
+            })?;
         }
     }
     Ok(())

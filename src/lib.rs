@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod database;
 pub mod playbook;
-pub mod tasks;
+pub mod server;
 pub mod state;
+pub mod tasks;

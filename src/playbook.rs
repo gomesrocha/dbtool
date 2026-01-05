@@ -1,21 +1,21 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use tracing::info;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Playbook {
     pub databases: Vec<Database>,
     pub tables: Vec<Table>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Database {
     pub name: String,
     pub if_not_exists: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Table {
     pub database: String,
     pub name: String,
@@ -37,8 +37,8 @@ pub async fn validate_playbook(playbook_path: &str) -> Result<()> {
     info!("Validating playbook: {}", playbook_path);
     let playbook_content = fs::read_to_string(playbook_path)
         .context(format!("Failed to read playbook: {}", playbook_path))?;
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content)
-        .context("Failed to parse playbook YAML")?;
+    let playbook: Playbook =
+        serde_yaml::from_str(&playbook_content).context("Failed to parse playbook YAML")?;
 
     // Check if SQL files exist
     for db in &playbook.databases {
@@ -48,7 +48,10 @@ pub async fn validate_playbook(playbook_path: &str) -> Result<()> {
     }
     for table in &playbook.tables {
         if !fs::metadata(&table.if_not_exists).is_ok() {
-            return Err(anyhow::anyhow!("SQL file not found: {}", table.if_not_exists));
+            return Err(anyhow::anyhow!(
+                "SQL file not found: {}",
+                table.if_not_exists
+            ));
         }
     }
 
